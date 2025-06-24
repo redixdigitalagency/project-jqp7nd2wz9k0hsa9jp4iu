@@ -43,15 +43,18 @@ export function DomainMonitor({ domains, onUpdate }: DomainMonitorProps) {
           const wasUp = domain.status === 'active';
           const wasSSLValid = domain.ssl_status === 'valid';
 
+          // שלח התראה רק אם הסטטוס השתנה מטוב לרע
           if (wasUp && !result.isUp) {
+            console.log(`שולח התראה: אתר ${domain.domain_name} לא זמין`);
             await sendAlert(
               domain.domain_name,
               'אתר לא זמין',
-              `האתר ${domain.domain_name} לא זמין. קוד שגיאה: ${result.statusCode}`
+              `האתר ${domain.domain_name} לא זמין. ${result.error ? `שגיאה: ${result.error}` : ''}`
             );
           }
 
           if (wasSSLValid && !result.sslValid) {
+            console.log(`שולח התראה: בעיית SSL ב-${domain.domain_name}`);
             await sendAlert(
               domain.domain_name,
               'בעיית SSL',
@@ -59,8 +62,9 @@ export function DomainMonitor({ domains, onUpdate }: DomainMonitorProps) {
             );
           }
 
-          // בדיקת זמן תגובה איטי
-          if (result.responseTime > 5000) {
+          // בדיקת זמן תגובה איטי (רק אם האתר זמין)
+          if (result.isUp && result.responseTime > 5000) {
+            console.log(`שולח התראה: תגובה איטית ב-${domain.domain_name}`);
             await sendAlert(
               domain.domain_name,
               'תגובה איטית',
@@ -69,31 +73,36 @@ export function DomainMonitor({ domains, onUpdate }: DomainMonitorProps) {
           }
 
           onUpdate(domain.id, updates);
+          console.log(`עדכון הושלם עבור ${domain.domain_name}:`, updates);
           
         } catch (error) {
           console.error(`שגיאה בניטור דומיין ${domain.domain_name}:`, error);
           
+          // עדכן את הדומיין כ-error אבל שמור על הנתונים הקיימים
           onUpdate(domain.id, {
             status: 'error',
             last_check: new Date().toISOString()
           });
         }
 
-        // המתנה קצרה בין בדיקות
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // המתנה קצרה בין בדיקות כדי לא להעמיס על הדפדפן
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
 
       setIsMonitoring(false);
       console.log('ניטור דומיינים הושלם');
     };
 
-    // ניטור ראשוני
-    monitorDomains();
+    // ניטור ראשוני אחרי 3 שניות
+    const initialTimeout = setTimeout(monitorDomains, 3000);
 
     // ניטור כל 5 דקות
     const interval = setInterval(monitorDomains, 5 * 60 * 1000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
   }, [domains, onUpdate, isMonitoring]);
 
   return null; // רכיב זה לא מציג כלום, הוא רק מנטר

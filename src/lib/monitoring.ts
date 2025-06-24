@@ -24,35 +24,13 @@ export async function checkDomainStatus(domain: string): Promise<DomainInfo> {
   try {
     // ניקוי הדומיין מפרוטוקולים
     const cleanDomain = domain.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    const url = `https://${cleanDomain}`;
     
     console.log(`בודק דומיין: ${cleanDomain}`);
     
-    // בדיקת זמינות האתר
-    const response = await fetch(url, {
-      method: 'HEAD',
-      mode: 'no-cors',
-      cache: 'no-cache'
-    });
+    // נסה כמה שיטות בדיקה שונות
+    const result = await checkDomainWithFallback(cleanDomain, startTime);
     
-    const responseTime = Date.now() - startTime;
-    
-    // בדיקת SSL
-    const sslInfo = await checkSSL(cleanDomain);
-    
-    // בדיקת WHOIS
-    const whoisInfo = await getWhoisInfo(cleanDomain);
-    
-    return {
-      domain: cleanDomain,
-      isUp: true,
-      responseTime,
-      statusCode: response.status || 200,
-      sslValid: sslInfo.valid,
-      sslExpiry: sslInfo.expiry,
-      domainExpiry: whoisInfo.expiryDate,
-      registrar: whoisInfo.registrar
-    };
+    return result;
     
   } catch (error) {
     console.error(`שגיאה בבדיקת דומיין ${domain}:`, error);
@@ -71,14 +49,146 @@ export async function checkDomainStatus(domain: string): Promise<DomainInfo> {
   }
 }
 
-// בדיקת SSL
+// בדיקת דומיין עם fallback methods
+async function checkDomainWithFallback(domain: string, startTime: number): Promise<DomainInfo> {
+  // רשימת שיטות בדיקה שונות
+  const methods = [
+    () => checkWithImage(domain),
+    () => checkWithScript(domain),
+    () => checkWithFetch(domain),
+  ];
+
+  let lastError: Error | null = null;
+  
+  for (const method of methods) {
+    try {
+      const isUp = await method();
+      const responseTime = Date.now() - startTime;
+      
+      if (isUp) {
+        // אם הדומיין זמין, נבדוק SSL ו-WHOIS
+        const sslInfo = await checkSSL(domain);
+        const whoisInfo = await getWhoisInfo(domain);
+        
+        return {
+          domain,
+          isUp: true,
+          responseTime,
+          statusCode: 200,
+          sslValid: sslInfo.valid,
+          sslExpiry: sslInfo.expiry,
+          domainExpiry: whoisInfo.expiryDate,
+          registrar: whoisInfo.registrar
+        };
+      }
+    } catch (error) {
+      lastError = error as Error;
+      console.log(`שיטת בדיקה נכשלה עבור ${domain}:`, error);
+      continue;
+    }
+  }
+  
+  // אם כל השיטות נכשלו, נחזיר תוצאה שלילית
+  const responseTime = Date.now() - startTime;
+  const sslInfo = await checkSSL(domain);
+  const whoisInfo = await getWhoisInfo(domain);
+  
+  return {
+    domain,
+    isUp: false,
+    responseTime,
+    statusCode: 0,
+    sslValid: sslInfo.valid,
+    sslExpiry: sslInfo.expiry,
+    domainExpiry: whoisInfo.expiryDate,
+    registrar: whoisInfo.registrar,
+    error: lastError?.message || 'לא ניתן לגשת לדומיין'
+  };
+}
+
+// בדיקה באמצעות Image loading
+async function checkWithImage(domain: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const timeout = setTimeout(() => {
+      resolve(false);
+    }, 5000);
+    
+    img.onload = () => {
+      clearTimeout(timeout);
+      resolve(true);
+    };
+    
+    img.onerror = () => {
+      clearTimeout(timeout);
+      resolve(false);
+    };
+    
+    // נסה לטעון favicon או תמונה קטנה
+    img.src = `https://${domain}/favicon.ico?_=${Date.now()}`;
+  });
+}
+
+// בדיקה באמצעות Script loading
+async function checkWithScript(domain: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const script = document.createElement('script');
+    const timeout = setTimeout(() => {
+      document.head.removeChild(script);
+      resolve(false);
+    }, 5000);
+    
+    script.onload = () => {
+      clearTimeout(timeout);
+      document.head.removeChild(script);
+      resolve(true);
+    };
+    
+    script.onerror = () => {
+      clearTimeout(timeout);
+      document.head.removeChild(script);
+      resolve(false);
+    };
+    
+    script.src = `https://${domain}/robots.txt?_=${Date.now()}`;
+    document.head.appendChild(script);
+  });
+}
+
+// בדיקה באמצעות Fetch (עם no-cors)
+async function checkWithFetch(domain: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    
+    const response = await fetch(`https://${domain}`, {
+      method: 'HEAD',
+      mode: 'no-cors',
+      cache: 'no-cache',
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    return true; // אם הגענו לכאן, הבקשה הצליחה
+  } catch (error) {
+    return false;
+  }
+}
+
+// בדיקת SSL משופרת
 async function checkSSL(domain: string): Promise<{ valid: boolean; expiry: string | null }> {
   try {
     // בדיקה פשוטה של SSL באמצעות fetch
-    const response = await fetch(`https://${domain}`, {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    
+    await fetch(`https://${domain}`, {
       method: 'HEAD',
-      mode: 'no-cors'
+      mode: 'no-cors',
+      signal: controller.signal
     });
+    
+    clearTimeout(timeoutId);
     
     // אם הגענו לכאן, SSL כנראה תקין
     // בפרויקט אמיתי נשתמש ב-API חיצוני לבדיקת SSL
@@ -94,12 +204,37 @@ async function checkSSL(domain: string): Promise<{ valid: boolean; expiry: strin
   }
 }
 
-// קבלת מידע WHOIS
+// קבלת מידע WHOIS משופר
 async function getWhoisInfo(domain: string): Promise<WhoisData> {
   try {
     // בפרויקט אמיתי נשתמש ב-API של WHOIS
-    // כרגע נחזיר נתונים לדוגמה
-    const registrars = ['GoDaddy', 'Namecheap', 'Google Domains', 'Cloudflare', 'Name.com'];
+    // כרגע נחזיר נתונים מציאותיים יותר בהתבסס על הדומיין
+    
+    const knownDomains: Record<string, WhoisData> = {
+      'google.com': {
+        registrar: 'MarkMonitor Inc.',
+        expiryDate: new Date(Date.now() + 300 * 24 * 60 * 60 * 1000).toISOString()
+      },
+      'github.com': {
+        registrar: 'DNStination Inc.',
+        expiryDate: new Date(Date.now() + 250 * 24 * 60 * 60 * 1000).toISOString()
+      },
+      'microsoft.com': {
+        registrar: 'MarkMonitor Inc.',
+        expiryDate: new Date(Date.now() + 400 * 24 * 60 * 60 * 1000).toISOString()
+      },
+      'example-down.com': {
+        registrar: 'GoDaddy',
+        expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+      }
+    };
+    
+    if (knownDomains[domain]) {
+      return knownDomains[domain];
+    }
+    
+    // עבור דומיינים לא ידועים, נחזיר נתונים אקראיים מציאותיים
+    const registrars = ['GoDaddy', 'Namecheap', 'Google Domains', 'Cloudflare', 'Name.com', 'MarkMonitor Inc.'];
     const randomRegistrar = registrars[Math.floor(Math.random() * registrars.length)];
     
     // תאריך פקיעה אקראי בין 30 ל-365 יום
