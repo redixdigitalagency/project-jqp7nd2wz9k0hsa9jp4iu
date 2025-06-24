@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Domain } from '@/entities';
+import { Domain, User } from '@/entities';
 import { DomainCard } from '@/components/DomainCard';
+import { DomainListView } from '@/components/DomainListView';
 import { AddDomainDialog } from '@/components/AddDomainDialog';
 import { DomainMonitor } from '@/components/DomainMonitor';
 import { Button } from '@/components/ui/button';
@@ -14,13 +15,20 @@ import {
   CheckCircle,
   Clock,
   TrendingUp,
-  Server
+  Server,
+  Grid3X3,
+  List,
+  LogIn,
+  LogOut,
+  User as UserIcon
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 const Index = () => {
   const [domains, setDomains] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [user, setUser] = useState<any>(null);
   const [stats, setStats] = useState({
     total: 0,
     active: 0,
@@ -30,15 +38,60 @@ const Index = () => {
   });
   const { toast } = useToast();
 
+  // בדיקת משתמש מחובר
+  useEffect(() => {
+    checkUser();
+  }, []);
+
   // טעינת דומיינים
   useEffect(() => {
-    loadDomains();
-  }, []);
+    if (user) {
+      loadDomains();
+    }
+  }, [user]);
 
   // עדכון סטטיסטיקות
   useEffect(() => {
     updateStats();
   }, [domains]);
+
+  const checkUser = async () => {
+    try {
+      const currentUser = await User.me();
+      setUser(currentUser);
+    } catch (error) {
+      console.log('משתמש לא מחובר');
+      setUser(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleLogin = async () => {
+    try {
+      await User.login();
+    } catch (error) {
+      toast({
+        title: "שגיאה",
+        description: "שגיאה בהתחברות",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await User.logout();
+      setUser(null);
+      setDomains([]);
+    } catch (error) {
+      toast({
+        title: "שגיאה",
+        description: "שגיאה בהתנתקות",
+        variant: "destructive",
+      });
+    }
+  };
 
   const loadDomains = async () => {
     try {
@@ -142,6 +195,37 @@ const Index = () => {
     );
   }
 
+  // אם המשתמש לא מחובר
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50 flex items-center justify-center" dir="rtl">
+        <Card className="w-full max-w-md card-gradient border-2">
+          <CardHeader className="text-center">
+            <div className="mx-auto p-3 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg w-fit mb-4">
+              <Globe className="h-8 w-8 text-white" />
+            </div>
+            <CardTitle className="text-2xl">מערכת ניטור דומיינים</CardTitle>
+            <p className="text-muted-foreground">
+              התחבר כדי לנטר את הדומיינים שלך
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Button 
+              onClick={handleLogin} 
+              className="w-full gap-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+            >
+              <LogIn className="h-4 w-4" />
+              התחבר עם Google
+            </Button>
+            <p className="text-xs text-muted-foreground text-center">
+              המערכת תשמור את הדומיינים שלך ותנטר אותם באופן רציף
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50" dir="rtl">
       {/* רכיב הניטור */}
@@ -167,7 +251,39 @@ const Index = () => {
                 </p>
               </div>
             </div>
-            <AddDomainDialog onAdd={handleAddDomain} />
+            
+            <div className="flex items-center gap-4">
+              {/* מידע משתמש */}
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <UserIcon className="h-4 w-4" />
+                {user.full_name || user.email}
+              </div>
+              
+              {/* כפתורי תצוגה */}
+              <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+                <Button
+                  variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setViewMode('grid')}
+                >
+                  <Grid3X3 className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant={viewMode === 'list' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setViewMode('list')}
+                >
+                  <List className="h-4 w-4" />
+                </Button>
+              </div>
+              
+              <AddDomainDialog onAdd={handleAddDomain} />
+              
+              <Button variant="outline" size="sm" onClick={handleLogout}>
+                <LogOut className="h-4 w-4 ml-2" />
+                התנתק
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -251,16 +367,26 @@ const Index = () => {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {domains.map((domain) => (
-              <DomainCard
-                key={domain.id}
-                domain={domain}
+          <>
+            {viewMode === 'grid' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {domains.map((domain) => (
+                  <DomainCard
+                    key={domain.id}
+                    domain={domain}
+                    onDelete={handleDeleteDomain}
+                    onToggleMonitoring={handleToggleMonitoring}
+                  />
+                ))}
+              </div>
+            ) : (
+              <DomainListView
+                domains={domains}
                 onDelete={handleDeleteDomain}
                 onToggleMonitoring={handleToggleMonitoring}
               />
-            ))}
-          </div>
+            )}
+          </>
         )}
 
         {/* מידע נוסף */}
