@@ -1,11 +1,296 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import React, { useState, useEffect } from 'react';
+import { Domain } from '@/entities';
+import { DomainCard } from '@/components/DomainCard';
+import { AddDomainDialog } from '@/components/AddDomainDialog';
+import { DomainMonitor } from '@/components/DomainMonitor';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { 
+  Globe, 
+  Shield, 
+  Activity, 
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  TrendingUp,
+  Server
+} from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 
 const Index = () => {
+  const [domains, setDomains] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [stats, setStats] = useState({
+    total: 0,
+    active: 0,
+    inactive: 0,
+    sslIssues: 0,
+    avgUptime: 0
+  });
+  const { toast } = useToast();
+
+  // טעינת דומיינים
+  useEffect(() => {
+    loadDomains();
+  }, []);
+
+  // עדכון סטטיסטיקות
+  useEffect(() => {
+    updateStats();
+  }, [domains]);
+
+  const loadDomains = async () => {
+    try {
+      setIsLoading(true);
+      const domainsList = await Domain.list();
+      setDomains(domainsList);
+    } catch (error) {
+      console.error('שגיאה בטעינת דומיינים:', error);
+      toast({
+        title: "שגיאה",
+        description: "שגיאה בטעינת רשימת הדומיינים",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const updateStats = () => {
+    const total = domains.length;
+    const active = domains.filter(d => d.status === 'active').length;
+    const inactive = domains.filter(d => d.status === 'inactive').length;
+    const sslIssues = domains.filter(d => d.ssl_status !== 'valid').length;
+    const avgUptime = total > 0 ? 
+      domains.reduce((sum, d) => sum + d.uptime_percentage, 0) / total : 0;
+
+    setStats({ total, active, inactive, sslIssues, avgUptime });
+  };
+
+  const handleAddDomain = async (newDomain: any) => {
+    try {
+      const created = await Domain.create(newDomain);
+      setDomains(prev => [...prev, created]);
+    } catch (error) {
+      console.error('שגיאה בהוספת דומיין:', error);
+      toast({
+        title: "שגיאה",
+        description: "שגיאה בהוספת הדומיין למסד הנתונים",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteDomain = async (id: string) => {
+    try {
+      await Domain.delete(id);
+      setDomains(prev => prev.filter(d => d.id !== id));
+      toast({
+        title: "דומיין נמחק",
+        description: "הדומיין נמחק בהצלחה מהמערכת",
+      });
+    } catch (error) {
+      console.error('שגיאה במחיקת דומיין:', error);
+      toast({
+        title: "שגיאה",
+        description: "שגיאה במחיקת הדומיין",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleToggleMonitoring = async (id: string, enabled: boolean) => {
+    try {
+      await Domain.update(id, { monitoring_enabled: enabled });
+      setDomains(prev => prev.map(d => 
+        d.id === id ? { ...d, monitoring_enabled: enabled } : d
+      ));
+      toast({
+        title: enabled ? "ניטור הופעל" : "ניטור הושבת",
+        description: `ניטור הדומיין ${enabled ? 'הופעל' : 'הושבת'} בהצלחה`,
+      });
+    } catch (error) {
+      console.error('שגיאה בעדכון ניטור:', error);
+      toast({
+        title: "שגיאה",
+        description: "שגיאה בעדכון הגדרות הניטור",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleUpdateDomain = async (domainId: string, updates: any) => {
+    try {
+      await Domain.update(domainId, updates);
+      setDomains(prev => prev.map(d => 
+        d.id === domainId ? { ...d, ...updates } : d
+      ));
+    } catch (error) {
+      console.error('שגיאה בעדכון דומיין:', error);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">טוען נתונים...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4">Welcome to Your Blank App</h1>
-        <p className="text-xl text-gray-600">Start building your amazing project here!</p>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50" dir="rtl">
+      {/* רכיב הניטור */}
+      <DomainMonitor 
+        domains={domains} 
+        onUpdate={handleUpdateDomain}
+      />
+
+      {/* כותרת */}
+      <div className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-10">
+        <div className="container mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg">
+                <Globe className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gradient">
+                  מערכת ניטור דומיינים
+                </h1>
+                <p className="text-muted-foreground">
+                  ניטור בזמן אמת של כל הדומיינים שלך
+                </p>
+              </div>
+            </div>
+            <AddDomainDialog onAdd={handleAddDomain} />
+          </div>
+        </div>
+      </div>
+
+      <div className="container mx-auto px-6 py-8">
+        {/* סטטיסטיקות */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+          <Card className="card-gradient border-2">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <Server className="h-4 w-4" />
+                סה"כ דומיינים
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.total}</div>
+            </CardContent>
+          </Card>
+
+          <Card className="card-gradient border-2">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <CheckCircle className="h-4 w-4 text-green-500" />
+                פעילים
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600">{stats.active}</div>
+            </CardContent>
+          </Card>
+
+          <Card className="card-gradient border-2">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-red-500" />
+                לא פעילים
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-red-600">{stats.inactive}</div>
+            </CardContent>
+          </Card>
+
+          <Card className="card-gradient border-2">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <Shield className="h-4 w-4 text-yellow-500" />
+                בעיות SSL
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-yellow-600">{stats.sslIssues}</div>
+            </CardContent>
+          </Card>
+
+          <Card className="card-gradient border-2">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-blue-500" />
+                זמינות ממוצעת
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-blue-600">
+                {stats.avgUptime.toFixed(1)}%
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* רשימת דומיינים */}
+        {domains.length === 0 ? (
+          <Card className="card-gradient border-2 border-dashed">
+            <CardContent className="flex flex-col items-center justify-center py-16">
+              <Globe className="h-16 w-16 text-muted-foreground mb-4" />
+              <h3 className="text-xl font-semibold mb-2">אין דומיינים במערכת</h3>
+              <p className="text-muted-foreground mb-6 text-center max-w-md">
+                התחל לנטר את הדומיינים שלך על ידי הוספת הדומיין הראשון למערכת
+              </p>
+              <AddDomainDialog onAdd={handleAddDomain} />
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {domains.map((domain) => (
+              <DomainCard
+                key={domain.id}
+                domain={domain}
+                onDelete={handleDeleteDomain}
+                onToggleMonitoring={handleToggleMonitoring}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* מידע נוסף */}
+        <div className="mt-12 text-center">
+          <Card className="card-gradient border-2 max-w-2xl mx-auto">
+            <CardContent className="py-8">
+              <div className="flex items-center justify-center gap-2 mb-4">
+                <Clock className="h-5 w-5 text-blue-500" />
+                <span className="font-semibold">ניטור אוטומטי</span>
+              </div>
+              <p className="text-muted-foreground">
+                המערכת בודקת את כל הדומיינים כל 5 דקות ושולחת התראות במייל במקרה של בעיות
+              </p>
+              <div className="flex items-center justify-center gap-4 mt-4">
+                <Badge variant="outline" className="gap-1">
+                  <Activity className="h-3 w-3" />
+                  ניטור בזמן אמת
+                </Badge>
+                <Badge variant="outline" className="gap-1">
+                  <Shield className="h-3 w-3" />
+                  בדיקת SSL
+                </Badge>
+                <Badge variant="outline" className="gap-1">
+                  <Globe className="h-3 w-3" />
+                  מעקב פקיעות
+                </Badge>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

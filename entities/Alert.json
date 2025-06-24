@@ -1,0 +1,38 @@
+{
+  "name": "Alert",
+  "description": "התראה על בעיה בדומיין",
+  "properties": {
+    "domain_id": {
+      "type": "string",
+      "description": "מזהה הדומיין"
+    },
+    "domain_name": {
+      "type": "string",
+      "description": "שם הדומיין"
+    },
+    "alert_type": {
+      "type": "string",
+      "description": "סוג ההתראה - downtime, ssl_expiry, domain_expiry, slow_response"
+    },
+    "severity": {
+      "type": "string",
+      "description": "חומרת ההתראה - low, medium, high, critical"
+    },
+    "message": {
+      "type": "string",
+      "description": "הודעת ההתראה"
+    },
+    "resolved": {
+      "type": "boolean",
+      "description": "האם ההתראה נפתרה"
+    },
+    "resolved_at": {
+      "type": "string",
+      "description": "זמן פתרון ההתראה"
+    },
+    "email_sent": {
+      "type": "boolean",
+      "description": "האם נשלח מייל"
+    }
+  }
+}

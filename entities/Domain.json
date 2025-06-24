@@ -1,0 +1,54 @@
+{
+  "name": "Domain",
+  "description": "דומיין לניטור",
+  "properties": {
+    "domain_name": {
+      "type": "string",
+      "description": "שם הדומיין"
+    },
+    "status": {
+      "type": "string",
+      "description": "סטטוס הדומיין - active, inactive, error"
+    },
+    "ssl_status": {
+      "type": "string",
+      "description": "סטטוס SSL - valid, invalid, expired, none"
+    },
+    "ssl_expiry_date": {
+      "type": "string",
+      "description": "תאריך פקיעת SSL"
+    },
+    "domain_expiry_date": {
+      "type": "string",
+      "description": "תאריך פקיעת הדומיין"
+    },
+    "domain_registrar": {
+      "type": "string",
+      "description": "ספק הדומיין"
+    },
+    "uptime_percentage": {
+      "type": "number",
+      "description": "אחוז זמינות"
+    },
+    "response_time": {
+      "type": "number",
+      "description": "זמן תגובה במילישניות"
+    },
+    "last_check": {
+      "type": "string",
+      "description": "זמן הבדיקה האחרונה"
+    },
+    "monitoring_enabled": {
+      "type": "boolean",
+      "description": "האם הניטור פעיל"
+    },
+    "notification_email": {
+      "type": "string",
+      "description": "מייל להתראות"
+    },
+    "monitoring_interval": {
+      "type": "number",
+      "description": "מרווח ניטור בדקות"
+    }
+  }
+}

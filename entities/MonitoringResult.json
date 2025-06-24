@@ -1,0 +1,42 @@
+{
+  "name": "MonitoringResult",
+  "description": "תוצאת ניטור דומיין",
+  "properties": {
+    "domain_id": {
+      "type": "string",
+      "description": "מזהה הדומיין"
+    },
+    "domain_name": {
+      "type": "string",
+      "description": "שם הדומיין"
+    },
+    "check_time": {
+      "type": "string",
+      "description": "זמן הבדיקה"
+    },
+    "status_code": {
+      "type": "number",
+      "description": "קוד סטטוס HTTP"
+    },
+    "response_time": {
+      "type": "number",
+      "description": "זמן תגובה במילישניות"
+    },
+    "is_up": {
+      "type": "boolean",
+      "description": "האם האתר זמין"
+    },
+    "ssl_valid": {
+      "type": "boolean",
+      "description": "האם SSL תקין"
+    },
+    "ssl_expiry": {
+      "type": "string",
+      "description": "תאריך פקיעת SSL"
+    },
+    "error_message": {
+      "type": "string",
+      "description": "הודעת שגיאה אם יש"
+    }
+  }
+}
