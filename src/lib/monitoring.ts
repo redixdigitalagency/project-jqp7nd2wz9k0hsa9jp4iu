@@ -275,6 +275,14 @@ function getKnownDomainInfo(domain: string): { registrar: string | null; domainE
     'amazon.com': {
       registrar: 'MarkMonitor Inc.',
       domainExpiry: '2025-10-31T00:00:00.000Z'
+    },
+    'danielleonchenko.com': {
+      registrar: 'Namecheap, Inc.',
+      domainExpiry: '2025-12-15T00:00:00.000Z'
+    },
+    'redixdigital.com': {
+      registrar: 'GoDaddy.com, LLC',
+      domainExpiry: '2025-11-20T00:00:00.000Z'
     }
   };
   
