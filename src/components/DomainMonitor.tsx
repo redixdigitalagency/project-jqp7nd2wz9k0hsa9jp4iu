@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { checkDomainStatus, sendAlert } from '@/lib/monitoring';
-import { Domain } from '@/entities';
 
 interface DomainMonitorProps {
   domains: any[];
@@ -46,30 +45,42 @@ export function DomainMonitor({ domains, onUpdate }: DomainMonitorProps) {
           // שלח התראה רק אם הסטטוס השתנה מטוב לרע
           if (wasUp && !result.isUp) {
             console.log(`שולח התראה: אתר ${domain.domain_name} לא זמין`);
-            await sendAlert(
-              domain.domain_name,
-              'אתר לא זמין',
-              `האתר ${domain.domain_name} לא זמין. ${result.error ? `שגיאה: ${result.error}` : ''}`
-            );
+            try {
+              await sendAlert(
+                domain.domain_name,
+                'אתר לא זמין',
+                `האתר ${domain.domain_name} לא זמין. ${result.error ? `שגיאה: ${result.error}` : ''}`
+              );
+            } catch (alertError) {
+              console.error('שגיאה בשליחת התראה:', alertError);
+            }
           }
 
           if (wasSSLValid && !result.sslValid) {
             console.log(`שולח התראה: בעיית SSL ב-${domain.domain_name}`);
-            await sendAlert(
-              domain.domain_name,
-              'בעיית SSL',
-              `תעודת SSL של האתר ${domain.domain_name} לא תקינה`
-            );
+            try {
+              await sendAlert(
+                domain.domain_name,
+                'בעיית SSL',
+                `תעודת SSL של האתר ${domain.domain_name} לא תקינה`
+              );
+            } catch (alertError) {
+              console.error('שגיאה בשליחת התראה:', alertError);
+            }
           }
 
           // בדיקת זמן תגובה איטי (רק אם האתר זמין)
           if (result.isUp && result.responseTime > 5000) {
             console.log(`שולח התראה: תגובה איטית ב-${domain.domain_name}`);
-            await sendAlert(
-              domain.domain_name,
-              'תגובה איטית',
-              `זמן התגובה של האתר ${domain.domain_name} הוא ${result.responseTime}ms`
-            );
+            try {
+              await sendAlert(
+                domain.domain_name,
+                'תגובה איטית',
+                `זמן התגובה של האתר ${domain.domain_name} הוא ${result.responseTime}ms`
+              );
+            } catch (alertError) {
+              console.error('שגיאה בשליחת התראה:', alertError);
+            }
           }
 
           onUpdate(domain.id, updates);
@@ -79,10 +90,14 @@ export function DomainMonitor({ domains, onUpdate }: DomainMonitorProps) {
           console.error(`שגיאה בניטור דומיין ${domain.domain_name}:`, error);
           
           // עדכן את הדומיין כ-error אבל שמור על הנתונים הקיימים
-          onUpdate(domain.id, {
-            status: 'error',
-            last_check: new Date().toISOString()
-          });
+          try {
+            onUpdate(domain.id, {
+              status: 'error',
+              last_check: new Date().toISOString()
+            });
+          } catch (updateError) {
+            console.error('שגיאה בעדכון דומיין:', updateError);
+          }
         }
 
         // המתנה קצרה בין בדיקות כדי לא להעמיס על הדפדפן
@@ -94,10 +109,20 @@ export function DomainMonitor({ domains, onUpdate }: DomainMonitorProps) {
     };
 
     // ניטור ראשוני אחרי 3 שניות
-    const initialTimeout = setTimeout(monitorDomains, 3000);
+    const initialTimeout = setTimeout(() => {
+      monitorDomains().catch(error => {
+        console.error('שגיאה בניטור ראשוני:', error);
+        setIsMonitoring(false);
+      });
+    }, 3000);
 
     // ניטור כל 5 דקות
-    const interval = setInterval(monitorDomains, 5 * 60 * 1000);
+    const interval = setInterval(() => {
+      monitorDomains().catch(error => {
+        console.error('שגיאה בניטור תקופתי:', error);
+        setIsMonitoring(false);
+      });
+    }, 5 * 60 * 1000);
 
     return () => {
       clearTimeout(initialTimeout);
