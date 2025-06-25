@@ -1,4 +1,5 @@
 import { sendEmail } from "@/integrations/core";
+import { invokeLLM } from "@/integrations/core";
 
 export interface DomainInfo {
   domain: string;
@@ -17,70 +18,6 @@ export interface WhoisData {
   expiryDate: string | null;
 }
 
-// מאגר נתונים קבועים לדומיינים ידועים
-const DOMAIN_DATA: Record<string, WhoisData> = {
-  'google.com': {
-    registrar: 'MarkMonitor Inc.',
-    expiryDate: '2025-09-14T00:00:00.000Z'
-  },
-  'github.com': {
-    registrar: 'DNStination Inc.',
-    expiryDate: '2025-10-09T00:00:00.000Z'
-  },
-  'microsoft.com': {
-    registrar: 'MarkMonitor Inc.',
-    expiryDate: '2025-05-03T00:00:00.000Z'
-  },
-  'facebook.com': {
-    registrar: 'RegistrarSafe, LLC',
-    expiryDate: '2025-03-30T00:00:00.000Z'
-  },
-  'amazon.com': {
-    registrar: 'MarkMonitor Inc.',
-    expiryDate: '2025-10-31T00:00:00.000Z'
-  },
-  'apple.com': {
-    registrar: 'CSC Corporate Domains, Inc.',
-    expiryDate: '2025-02-19T00:00:00.000Z'
-  },
-  'netflix.com': {
-    registrar: 'MarkMonitor Inc.',
-    expiryDate: '2025-04-25T00:00:00.000Z'
-  },
-  'stackoverflow.com': {
-    registrar: 'MarkMonitor Inc.',
-    expiryDate: '2025-12-26T00:00:00.000Z'
-  },
-  'linkedin.com': {
-    registrar: 'MarkMonitor Inc.',
-    expiryDate: '2025-05-19T00:00:00.000Z'
-  },
-  'twitter.com': {
-    registrar: 'CSC Corporate Domains, Inc.',
-    expiryDate: '2025-05-25T00:00:00.000Z'
-  },
-  'example-down.com': {
-    registrar: 'GoDaddy.com, LLC',
-    expiryDate: '2025-01-15T00:00:00.000Z'
-  }
-};
-
-// פונקציה ליצירת hash קבוע מדומיין
-function getDomainHash(domain: string): number {
-  try {
-    let hash = 0;
-    for (let i = 0; i < domain.length; i++) {
-      const char = domain.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
-    }
-    return Math.abs(hash);
-  } catch (error) {
-    console.error('Error creating domain hash:', error);
-    return 12345; // fallback hash
-  }
-}
-
 // פונקציה לבדיקת סטטוס דומיין
 export async function checkDomainStatus(domain: string): Promise<DomainInfo> {
   const startTime = Date.now();
@@ -91,16 +28,13 @@ export async function checkDomainStatus(domain: string): Promise<DomainInfo> {
     
     console.log(`בודק דומיין: ${cleanDomain}`);
     
-    // נסה כמה שיטות בדיקה שונות
-    const result = await checkDomainWithFallback(cleanDomain, startTime);
+    // בדיקה אמיתית של הדומיין
+    const result = await checkDomainWithRealData(cleanDomain, startTime);
     
     return result;
     
   } catch (error) {
     console.error(`שגיאה בבדיקת דומיין ${domain}:`, error);
-    
-    // Get domain info even if check fails
-    const whoisInfo = await getWhoisInfo(domain.replace(/^https?:\/\//, '').replace(/\/$/, ''));
     
     return {
       domain: domain.replace(/^https?:\/\//, '').replace(/\/$/, ''),
@@ -109,127 +43,160 @@ export async function checkDomainStatus(domain: string): Promise<DomainInfo> {
       statusCode: 0,
       sslValid: false,
       sslExpiry: null,
-      domainExpiry: whoisInfo.expiryDate,
-      registrar: whoisInfo.registrar,
+      domainExpiry: null,
+      registrar: null,
       error: error instanceof Error ? error.message : 'שגיאה לא ידועה'
     };
   }
 }
 
-// בדיקת דומיין עם fallback methods
-async function checkDomainWithFallback(domain: string, startTime: number): Promise<DomainInfo> {
+// בדיקת דומיין עם נתונים אמיתיים
+async function checkDomainWithRealData(domain: string, startTime: number): Promise<DomainInfo> {
   let isUp = false;
+  let statusCode = 0;
   let lastError: Error | null = null;
   
-  // Try simple connectivity check first
+  // בדיקה אמיתית של זמינות האתר
   try {
-    isUp = await checkWithSimpleMethod(domain);
+    const connectivityResult = await checkRealConnectivity(domain);
+    isUp = connectivityResult.isUp;
+    statusCode = connectivityResult.statusCode;
   } catch (error) {
     lastError = error as Error;
-    console.log(`Simple check failed for ${domain}:`, error);
+    console.log(`Connectivity check failed for ${domain}:`, error);
   }
   
   const responseTime = Date.now() - startTime;
-  const sslInfo = await checkSSL(domain);
-  const whoisInfo = await getWhoisInfo(domain);
+  
+  // קבלת נתונים אמיתיים על הדומיין
+  const realDomainInfo = await getRealDomainInfo(domain);
   
   return {
     domain,
     isUp,
     responseTime,
-    statusCode: isUp ? 200 : 0,
-    sslValid: sslInfo.valid,
-    sslExpiry: sslInfo.expiry,
-    domainExpiry: whoisInfo.expiryDate,
-    registrar: whoisInfo.registrar,
+    statusCode,
+    sslValid: realDomainInfo.sslValid,
+    sslExpiry: realDomainInfo.sslExpiry,
+    domainExpiry: realDomainInfo.domainExpiry,
+    registrar: realDomainInfo.registrar,
     error: lastError?.message
   };
 }
 
-// Simplified domain check method
-async function checkWithSimpleMethod(domain: string): Promise<boolean> {
+// בדיקה אמיתית של קישוריות
+async function checkRealConnectivity(domain: string): Promise<{ isUp: boolean; statusCode: number }> {
   try {
-    // Use a simple image loading approach
-    return new Promise((resolve) => {
-      const img = new Image();
-      const timeout = setTimeout(() => {
-        resolve(false);
-      }, 3000); // Reduced timeout
-      
-      img.onload = () => {
-        clearTimeout(timeout);
-        resolve(true);
-      };
-      
-      img.onerror = () => {
-        clearTimeout(timeout);
-        resolve(false);
-      };
-      
-      // Try to load favicon
-      img.src = `https://${domain}/favicon.ico?_=${Date.now()}`;
+    // נסה לגשת לדומיין עם fetch
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    
+    const response = await fetch(`https://${domain}`, {
+      method: 'HEAD',
+      mode: 'no-cors',
+      cache: 'no-cache',
+      signal: controller.signal
     });
-  } catch (error) {
-    console.error('Simple check error:', error);
-    return false;
-  }
-}
-
-// בדיקת SSL משופרת
-async function checkSSL(domain: string): Promise<{ valid: boolean; expiry: string | null }> {
-  try {
-    // נתונים קבועים לפי דומיין
-    const hash = getDomainHash(domain);
-    const daysUntilExpiry = 30 + (hash % 335); // בין 30 ל-365 יום
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + daysUntilExpiry);
     
-    return {
-      valid: true,
-      expiry: expiryDate.toISOString()
-    };
+    clearTimeout(timeoutId);
+    
+    // אם הגענו לכאן, האתר זמין
+    return { isUp: true, statusCode: 200 };
+    
   } catch (error) {
-    console.error('SSL check error:', error);
-    return {
-      valid: false,
-      expiry: null
-    };
-  }
-}
-
-// קבלת מידע WHOIS עם נתונים אמיתיים וקבועים
-async function getWhoisInfo(domain: string): Promise<WhoisData> {
-  try {
-    // בדוק אם יש נתונים קבועים לדומיין
-    if (DOMAIN_DATA[domain]) {
-      return DOMAIN_DATA[domain];
+    // נסה שיטה חלופית עם image loading
+    try {
+      const imageResult = await checkWithImage(domain);
+      return { isUp: imageResult, statusCode: imageResult ? 200 : 0 };
+    } catch (imgError) {
+      console.error('Image check also failed:', imgError);
+      return { isUp: false, statusCode: 0 };
     }
+  }
+}
+
+// בדיקה עם טעינת תמונה
+async function checkWithImage(domain: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const timeout = setTimeout(() => {
+      resolve(false);
+    }, 5000);
     
-    // עבור דומיינים לא ידועים, צור נתונים קבועים בהתבסס על hash
-    const hash = getDomainHash(domain);
-    const registrars = ['GoDaddy.com, LLC', 'Namecheap, Inc.', 'Google LLC', 'Cloudflare, Inc.', 'Name.com, Inc.', 'MarkMonitor Inc.'];
-    const registrarIndex = hash % registrars.length;
-    const selectedRegistrar = registrars[registrarIndex];
-    
-    // תאריך פקיעה קבוע בהתבסס על hash
-    const daysUntilExpiry = 30 + (hash % 335); // בין 30 ל-365 יום
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + daysUntilExpiry);
-    
-    const domainData = {
-      registrar: selectedRegistrar,
-      expiryDate: expiryDate.toISOString()
+    img.onload = () => {
+      clearTimeout(timeout);
+      resolve(true);
     };
     
-    // שמור בזיכרון לשימוש עתידי
-    DOMAIN_DATA[domain] = domainData;
+    img.onerror = () => {
+      clearTimeout(timeout);
+      resolve(false);
+    };
     
-    return domainData;
-  } catch (error) {
-    console.error('שגיאה בקבלת מידע WHOIS:', error);
+    // נסה לטעון favicon
+    img.src = `https://${domain}/favicon.ico?_=${Date.now()}`;
+  });
+}
+
+// קבלת נתונים אמיתיים על הדומיין
+async function getRealDomainInfo(domain: string): Promise<{
+  sslValid: boolean;
+  sslExpiry: string | null;
+  domainExpiry: string | null;
+  registrar: string | null;
+}> {
+  try {
+    console.log(`מקבל נתונים אמיתיים עבור ${domain}`);
+    
+    // שימוש ב-LLM לקבלת נתונים אמיתיים על הדומיין
+    const domainData = await invokeLLM({
+      prompt: `Please provide real, current information about the domain "${domain}". I need:
+      1. SSL certificate status (valid/invalid)
+      2. SSL certificate expiry date (if available)
+      3. Domain expiry date
+      4. Domain registrar name
+      
+      Please search for current, accurate information about this domain and return the data in JSON format.
+      If you cannot find specific information, return null for that field.
+      
+      Return format:
+      {
+        "sslValid": boolean,
+        "sslExpiry": "YYYY-MM-DDTHH:mm:ss.sssZ" or null,
+        "domainExpiry": "YYYY-MM-DDTHH:mm:ss.sssZ" or null,
+        "registrar": "registrar name" or null
+      }`,
+      add_context_from_internet: true,
+      response_json_schema: {
+        type: "object",
+        properties: {
+          sslValid: { type: "boolean" },
+          sslExpiry: { type: ["string", "null"] },
+          domainExpiry: { type: ["string", "null"] },
+          registrar: { type: ["string", "null"] }
+        },
+        required: ["sslValid", "sslExpiry", "domainExpiry", "registrar"]
+      }
+    });
+    
+    console.log(`נתונים אמיתיים עבור ${domain}:`, domainData);
+    
     return {
-      registrar: 'Unknown Registrar',
-      expiryDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString() // 90 days from now
+      sslValid: domainData.sslValid || false,
+      sslExpiry: domainData.sslExpiry,
+      domainExpiry: domainData.domainExpiry,
+      registrar: domainData.registrar
+    };
+    
+  } catch (error) {
+    console.error(`שגיאה בקבלת נתונים אמיתיים עבור ${domain}:`, error);
+    
+    // fallback - נסה לקבל לפחות מידע בסיסי
+    return {
+      sslValid: false,
+      sslExpiry: null,
+      domainExpiry: null,
+      registrar: null
     };
   }
 }
