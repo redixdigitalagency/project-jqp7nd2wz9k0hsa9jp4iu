@@ -17,6 +17,20 @@ export interface WhoisData {
   expiryDate: string | null;
 }
 
+// Safe wrapper for async operations
+async function safeAsync<T>(
+  operation: () => Promise<T>,
+  fallback: T,
+  context: string
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    console.error(`🔴 Error in ${context}:`, error);
+    return fallback;
+  }
+}
+
 // פונקציה לבדיקת סטטוס דומיין
 export async function checkDomainStatus(domain: string): Promise<DomainInfo> {
   const startTime = Date.now();
@@ -25,15 +39,16 @@ export async function checkDomainStatus(domain: string): Promise<DomainInfo> {
     // ניקוי הדומיין מפרוטוקולים
     const cleanDomain = domain.replace(/^https?:\/\//, '').replace(/\/$/, '');
     
-    console.log(`בודק דומיין: ${cleanDomain}`);
+    console.log(`🔍 בודק דומיין: ${cleanDomain}`);
     
     // בדיקה אמיתית של הדומיין
     const result = await checkDomainWithRealData(cleanDomain, startTime);
     
+    console.log(`✅ בדיקת דומיין הושלמה עבור ${cleanDomain}`);
     return result;
     
   } catch (error) {
-    console.error(`שגיאה בבדיקת דומיין ${domain}:`, error);
+    console.error(`🔴 שגיאה בבדיקת דומיין ${domain}:`, error);
     
     return {
       domain: domain.replace(/^https?:\/\//, '').replace(/\/$/, ''),
@@ -56,19 +71,28 @@ async function checkDomainWithRealData(domain: string, startTime: number): Promi
   let lastError: Error | null = null;
   
   // בדיקה אמיתית של זמינות האתר
-  try {
-    const connectivityResult = await checkRealConnectivity(domain);
-    isUp = connectivityResult.isUp;
-    statusCode = connectivityResult.statusCode;
-  } catch (error) {
-    lastError = error as Error;
-    console.log(`Connectivity check failed for ${domain}:`, error);
-  }
+  const connectivityResult = await safeAsync(
+    () => checkRealConnectivity(domain),
+    { isUp: false, statusCode: 0 },
+    `connectivity check for ${domain}`
+  );
+  
+  isUp = connectivityResult.isUp;
+  statusCode = connectivityResult.statusCode;
   
   const responseTime = Date.now() - startTime;
   
   // קבלת נתונים על הדומיין בשיטה חלופית
-  const domainInfo = await getDomainInfoAlternative(domain);
+  const domainInfo = await safeAsync(
+    () => getDomainInfoAlternative(domain),
+    {
+      sslValid: false,
+      sslExpiry: null,
+      domainExpiry: null,
+      registrar: null
+    },
+    `domain info for ${domain}`
+  );
   
   return {
     domain,
@@ -103,20 +127,27 @@ async function checkRealConnectivity(domain: string): Promise<{ isUp: boolean; s
     return { isUp: true, statusCode: 200 };
     
   } catch (error) {
+    console.log(`⚠️ Primary connectivity check failed for ${domain}, trying alternatives`);
+    
     // נסה שיטה חלופית עם image loading
-    try {
-      const imageResult = await checkWithImage(domain);
-      return { isUp: imageResult, statusCode: imageResult ? 200 : 0 };
-    } catch (imgError) {
-      // נסה שיטה נוספת עם iframe
-      try {
-        const iframeResult = await checkWithIframe(domain);
-        return { isUp: iframeResult, statusCode: iframeResult ? 200 : 0 };
-      } catch (iframeError) {
-        console.error('All connectivity checks failed:', iframeError);
-        return { isUp: false, statusCode: 0 };
-      }
+    const imageResult = await safeAsync(
+      () => checkWithImage(domain),
+      false,
+      `image check for ${domain}`
+    );
+    
+    if (imageResult) {
+      return { isUp: true, statusCode: 200 };
     }
+    
+    // נסה שיטה נוספת עם iframe
+    const iframeResult = await safeAsync(
+      () => checkWithIframe(domain),
+      false,
+      `iframe check for ${domain}`
+    );
+    
+    return { isUp: iframeResult, statusCode: iframeResult ? 200 : 0 };
   }
 }
 
@@ -139,7 +170,7 @@ async function checkWithImage(domain: string): Promise<boolean> {
     };
     
     // נסה לטעון favicon
-    img.src = `https://${domain}/favicon.ico?_=${Date.now()}`;
+    img.src = `https://${domain}/favicon.ico?_=\${Date.now()}`;
   });
 }
 
@@ -152,24 +183,41 @@ async function checkWithIframe(domain: string): Promise<boolean> {
     iframe.style.height = '1px';
     
     const timeout = setTimeout(() => {
-      document.body.removeChild(iframe);
+      try {
+        document.body.removeChild(iframe);
+      } catch (e) {
+        // Iframe might already be removed
+      }
       resolve(false);
     }, 5000);
     
     iframe.onload = () => {
       clearTimeout(timeout);
-      document.body.removeChild(iframe);
+      try {
+        document.body.removeChild(iframe);
+      } catch (e) {
+        // Iframe might already be removed
+      }
       resolve(true);
     };
     
     iframe.onerror = () => {
       clearTimeout(timeout);
-      document.body.removeChild(iframe);
+      try {
+        document.body.removeChild(iframe);
+      } catch (e) {
+        // Iframe might already be removed
+      }
       resolve(false);
     };
     
-    iframe.src = `https://${domain}`;
-    document.body.appendChild(iframe);
+    try {
+      iframe.src = `https://${domain}`;
+      document.body.appendChild(iframe);
+    } catch (error) {
+      clearTimeout(timeout);
+      resolve(false);
+    }
   });
 }
 
@@ -181,7 +229,7 @@ async function getDomainInfoAlternative(domain: string): Promise<{
   registrar: string | null;
 }> {
   try {
-    console.log(`בודק SSL ומידע דומיין עבור ${domain}`);
+    console.log(`🔍 בודק SSL ומידע דומיין עבור ${domain}`);
     
     // בדיקת SSL באמצעות ניסיון גישה לאתר
     const sslInfo = await checkSSLStatus(domain);
@@ -197,7 +245,7 @@ async function getDomainInfoAlternative(domain: string): Promise<{
     };
     
   } catch (error) {
-    console.error(`שגיאה בקבלת מידע דומיין עבור ${domain}:`, error);
+    console.error(`🔴 שגיאה בקבלת מידע דומיין עבור ${domain}:`, error);
     
     return {
       sslValid: false,
@@ -223,8 +271,6 @@ async function checkSSLStatus(domain: string): Promise<{ valid: boolean; expiry:
     clearTimeout(timeoutId);
     
     // אם הגענו לכאן, SSL תקין
-    // נסה לקבל מידע על תעודה מה-headers
-    const securityHeaders = response.headers.get('strict-transport-security');
     const hasSSL = response.url.startsWith('https://');
     
     if (hasSSL) {
@@ -244,7 +290,7 @@ async function checkSSLStatus(domain: string): Promise<{ valid: boolean; expiry:
     };
     
   } catch (error) {
-    console.log(`SSL check failed for ${domain}:`, error);
+    console.log(`⚠️ SSL check failed for ${domain}:`, error);
     return {
       valid: false,
       expiry: null
@@ -342,7 +388,7 @@ export function getDaysUntilExpiry(expiryDate: string | null): number | null {
 
 // שליחת התראה במייל
 export async function sendAlert(domain: string, alertType: string, message: string) {
-  try {
+  return safeAsync(async () => {
     const subject = `התראה: בעיה בדומיין ${domain}`;
     const body = `
       <div dir="rtl" style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -364,15 +410,13 @@ export async function sendAlert(domain: string, alertType: string, message: stri
       body
     });
     
-    console.log(`התראה נשלחה בהצלחה עבור דומיין ${domain}`);
-  } catch (error) {
-    console.error('שגיאה בשליחת התראה:', error);
-  }
+    console.log(`✅ התראה נשלחה בהצלחה עבור דומיין ${domain}`);
+  }, undefined, `sending alert for ${domain}`);
 }
 
 // שליחת התראת ניסיון
 export async function sendTestNotification(domain: string) {
-  try {
+  return safeAsync(async () => {
     const subject = `התראת ניסיון: ${domain}`;
     const body = `
       <div dir="rtl" style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -394,10 +438,7 @@ export async function sendTestNotification(domain: string) {
     });
     
     return true;
-  } catch (error) {
-    console.error('שגיאה בשליחת התראת ניסיון:', error);
-    return false;
-  }
+  }, false, `sending test notification for ${domain}`);
 }
 
 // פורמט זמן בעברית
